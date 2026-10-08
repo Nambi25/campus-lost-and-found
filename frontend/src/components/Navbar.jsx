@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Archive,
   Compass,
@@ -6,6 +6,8 @@ import {
   Search,
   Sparkles,
 } from '../icons.js';
+import { signOut } from '../services/api.js';
+import { LogOut } from 'lucide-react';
 
 function CampusMark() {
   return (
@@ -63,6 +65,12 @@ const navItems = [
 ];
 
 export default function Navbar() {
+  const navigate = useNavigate();
+
+  function handleSignOut() {
+    signOut();
+    navigate('/sign-in', { replace: true });
+  }
 
   return (
     <aside className="sidebar" aria-label="Main navigation">
@@ -140,6 +148,11 @@ export default function Navbar() {
       </div>
 
       {/* Sidebar information */}
+      <button className="button button-block sidebar-signout" type="button" onClick={handleSignOut}>
+        <LogOut size={15} />
+        Sign out
+      </button>
+
       <div className="sidebar-note">
         <Sparkles size={15} />
 
@@ -148,8 +161,8 @@ export default function Navbar() {
             Photo-match hints
           </strong>
 
-          Suggestions use demo signals.
-          No AI service is connected.
+          Backend photo matching
+          uses pHash + colour + text signals.
         </span>
       </div>
 
