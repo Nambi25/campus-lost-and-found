@@ -1,10 +1,6 @@
-"""Business logic for items: image storage, image fingerprinting and matching.
+"""Business logic for items: image storage, image fingerprinting, metadata extraction, and two-stage matching.
 
-"AI image similarity" here is lightweight and runs on any laptop (no GPU, no model download):
-  * perceptual hash (pHash)  -> catches the same object photographed again
-  * colour histogram         -> catches "black earbuds case" vs "black earbuds case"
-  * text similarity          -> title + description + category
-Combined into one 0..1 score. Swap `image_similarity` for CLIP embeddings later if you have time.
+Integrated with local Gemma 4 VLM (Ollama) for stage-1 auto-description and stage-2 candidate verification.
 """
 import json
 import os
@@ -17,6 +13,17 @@ from PIL import Image
 from sqlalchemy.orm import Session
 
 from models.item import Item, ItemOut, ItemStatus, ItemType, MatchOut
+
+# Try importing AI module handlers
+try:
+    from ai.describe import describe_item
+except ImportError:
+    describe_item = None
+
+try:
+    from ai.verify import verify_candidate_match
+except ImportError:
+    verify_candidate_match = None
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
@@ -47,6 +54,17 @@ async def save_image(file: UploadFile) -> tuple[str, str, str]:
 
     phash = str(imagehash.phash(img))
     return path, phash, json.dumps(color_signature(img))
+
+
+def extract_ai_details(image_path: str) -> dict:
+    """Invokes local Gemma 4 (via describe_item) to extract category, brand, color breakdown, and descriptions."""
+    if not describe_item or not os.path.exists(image_path):
+        return {}
+    try:
+        return describe_item(image_path) or {}
+    except Exception as e:
+        print(f"[AI Extract Warning] Failed to describe image: {e}")
+        return {}
 
 
 def color_signature(img: Image.Image, bins: int = 4) -> list[float]:
@@ -119,17 +137,52 @@ def search_items(
 
 
 def find_matches(db: Session, item: Item, limit: int = 5, min_score: float = 0.3) -> list[MatchOut]:
-    """For a LOST item, rank open FOUND items (and vice versa)."""
+    """Two-stage lost & found matching algorithm:
+    Stage 1: Fast retrieval using pHash, color histogram, and text/category similarity.
+    Stage 2: Re-ranking top candidates using Gemma 4 image-to-image feature verification.
+    """
     opposite = ItemType.found if item.type == ItemType.lost else ItemType.lost
     candidates = db.query(Item).filter(Item.type == opposite, Item.status == ItemStatus.open).all()
 
-    results = []
+    # Stage 1: Candidate Filtering
+    stage1_results = []
     for c in candidates:
         img = image_similarity(item, c)
         txt = text_similarity(item, c)
         score = 0.6 * img + 0.4 * txt if img is not None else txt
         if score >= min_score:
-            results.append(MatchOut(item=to_out(c), score=round(score, 3), image_score=img, text_score=txt))
-    results.sort(key=lambda m: m.score, reverse=True)
-    return results[:limit]
+            stage1_results.append({
+                "candidate": c,
+                "score": score,
+                "image_score": img,
+                "text_score": txt
+            })
+    
+    stage1_results.sort(key=lambda x: x["score"], reverse=True)
+    top_candidates = stage1_results[:limit]
 
+    # Stage 2: Gemma 4 Visual Verification & Re-ranking
+    final_results = []
+    for entry in top_candidates:
+        c = entry["candidate"]
+        final_score = entry["score"]
+
+        # Run Stage 2 verification if image paths exist and local AI is enabled
+        if verify_candidate_match and item.image_path and c.image_path and os.path.exists(item.image_path) and os.path.exists(c.image_path):
+            verification = verify_candidate_match(item.image_path, c.image_path)
+            if verification.get("is_match"):
+                gemma_confidence = verification.get("confidence", 0.5)
+                # Boost final score with Gemma's verification confidence
+                final_score = round(0.4 * final_score + 0.6 * gemma_confidence, 3)
+
+        final_results.append(
+            MatchOut(
+                item=to_out(c),
+                score=final_score,
+                image_score=entry["image_score"],
+                text_score=entry["text_score"]
+            )
+        )
+
+    final_results.sort(key=lambda m: m.score, reverse=True)
+    return final_results
