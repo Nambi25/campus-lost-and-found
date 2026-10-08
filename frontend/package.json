@@ -1,0 +1,24 @@
+{
+  "name": "campusfind",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.25.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config frontend/vite.config.js frontend",
+    "build": "vite build --config frontend/vite.config.js frontend",
+    "preview": "vite preview --config frontend/vite.config.js frontend"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "4.6.0",
+    "lucide-react": "0.468.0",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "react-router-dom": "7.6.2",
+    "vite": "6.3.5"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}
