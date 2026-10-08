@@ -49,6 +49,7 @@ async def create_item(
     )
     if image and image.filename:
         item.image_path, item.image_hash, item.color_sig = await item_service.save_image(image)
+        item.image_url = item_service.upload_to_storage(item.image_path, image.content_type)
 
     db.add(item)
     db.commit()
@@ -148,6 +149,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db), user: User = Depend
         raise HTTPException(404, "Item not found")
     if item.reporter_id != user.id:
         raise HTTPException(403, "Only the reporter can delete this")
+    item_service.delete_from_storage(item.image_url)
     if item.image_path and os.path.exists(item.image_path):
         os.remove(item.image_path)
     db.delete(item)
