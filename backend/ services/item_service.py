@@ -5,6 +5,8 @@ Integrated with local Gemma 4 VLM (Ollama) for stage-1 auto-description and stag
 import json
 import os
 import uuid
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 from difflib import SequenceMatcher
 
 import imagehash
@@ -28,6 +30,9 @@ except ImportError:
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "uploads")
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_STORAGE_BUCKET = os.getenv("SUPABASE_STORAGE_BUCKET", "campusfind-images")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
@@ -54,6 +59,61 @@ async def save_image(file: UploadFile) -> tuple[str, str, str]:
 
     phash = str(imagehash.phash(img))
     return path, phash, json.dumps(color_signature(img))
+
+
+def cloud_storage_enabled() -> bool:
+    return bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+
+
+def upload_to_storage(local_path: str, content_type: str | None = None) -> str | None:
+    if not cloud_storage_enabled():
+        return None
+    filename = os.path.basename(local_path)
+    object_path = f"items/{filename}"
+    url = f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_STORAGE_BUCKET, safe='')}/{quote(object_path, safe='/')}"
+    with open(local_path, "rb") as f:
+        data = f.read()
+    req = Request(url, data=data, method="POST", headers={"Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}", "apikey": SUPABASE_SERVICE_ROLE_KEY, "Content-Type": content_type or "application/octet-stream"})
+    try:
+        with urlopen(req, timeout=30) as response:
+            response.read()
+    except Exception as exc:
+        raise HTTPException(502, f"Image storage upload failed: {exc}") from exc
+    return f"{SUPABASE_URL}/storage/v1/object/public/{quote(SUPABASE_STORAGE_BUCKET, safe='')}/{quote(object_path, safe='/')}"
+
+
+def delete_from_storage(image_url: str | None) -> None:
+    if not (cloud_storage_enabled() and image_url):
+        return
+    prefix = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_STORAGE_BUCKET}/"
+    if not image_url.startswith(prefix):
+        return
+    object_path = image_url[len(prefix):]
+    url = f"{SUPABASE_URL}/storage/v1/object/{quote(SUPABASE_STORAGE_BUCKET, safe='')}/{quote(object_path, safe='/')}"
+    req = Request(url, method="DELETE", headers={"Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}", "apikey": SUPABASE_SERVICE_ROLE_KEY})
+    try:
+        with urlopen(req, timeout=30) as response:
+            response.read()
+    except Exception as exc:
+        print(f"[Storage Warning] Could not delete remote image: {exc}")
+
+
+def ensure_local_image(item: Item) -> str | None:
+    if item.image_path and os.path.exists(item.image_path):
+        return item.image_path
+    if not item.image_url:
+        return None
+    filename = os.path.basename(item.image_url.split("?", 1)[0])
+    path = os.path.join(UPLOAD_DIR, filename)
+    try:
+        req = Request(item.image_url, headers={"User-Agent": "CampusFind/1.0"})
+        with urlopen(req, timeout=30) as response, open(path, "wb") as f:
+            f.write(response.read())
+        item.image_path = path
+        return path
+    except Exception as exc:
+        print(f"[Storage Warning] Could not download remote image: {exc}")
+        return None
 
 
 def extract_ai_details(image_path: str) -> dict:
@@ -106,7 +166,9 @@ def text_similarity(a: Item, b: Item) -> float:
 # ---------- queries ----------
 def to_out(item: Item, base_url: str = "") -> ItemOut:
     out = ItemOut.model_validate(item)
-    if item.image_path:
+    if item.image_url:
+        out.image_url = item.image_url
+    elif item.image_path:
         out.image_url = f"{base_url}/uploads/{os.path.basename(item.image_path)}"
     return out
 
@@ -168,8 +230,10 @@ def find_matches(db: Session, item: Item, limit: int = 5, min_score: float = 0.3
         final_score = entry["score"]
 
         # Run Stage 2 verification if image paths exist and local AI is enabled
-        if verify_candidate_match and item.image_path and c.image_path and os.path.exists(item.image_path) and os.path.exists(c.image_path):
-            verification = verify_candidate_match(item.image_path, c.image_path)
+        item_local = ensure_local_image(item)
+        candidate_local = ensure_local_image(c)
+        if verify_candidate_match and item_local and candidate_local and os.path.exists(item_local) and os.path.exists(candidate_local):
+            verification = verify_candidate_match(item_local, candidate_local)
             if verification.get("is_match"):
                 gemma_confidence = verification.get("confidence", 0.5)
                 # Boost final score with Gemma's verification confidence
