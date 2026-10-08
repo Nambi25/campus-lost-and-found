@@ -5,9 +5,17 @@ const categories = ['Electronics', 'School supplies', 'Bags & accessories', 'Clo
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 
 function localDateTime() {
-  const now = new Date();
-  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-  return now.toISOString().slice(0, 16);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
 }
 
 function fileAsDataUrl(file) {
@@ -43,7 +51,7 @@ export default function ItemForm({ kind, onSubmit }) {
       return;
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      setErrors((current) => ({ ...current, image: 'For this browser-only demo, choose an image under 3 MB.' }));
+      setErrors((current) => ({ ...current, image: 'Choose an image under 3 MB.' }));
       event.target.value = '';
       return;
     }
@@ -78,6 +86,7 @@ export default function ItemForm({ kind, onSubmit }) {
         description: fields.description.trim(),
         location: fields.location.trim(),
         imageUrl,
+        imageFile,
         imageName: imageFile?.name || '',
         kind,
       });
@@ -120,7 +129,7 @@ export default function ItemForm({ kind, onSubmit }) {
         <div className="form-field">
           <label htmlFor="item-timestamp">When was it {isFound ? 'found' : 'last seen'}? <span className="required">*</span></label>
           <input id="item-timestamp" className="form-control" type="datetime-local" value={fields.timestamp} onChange={(event) => update('timestamp', event.target.value)} aria-invalid={Boolean(errors.timestamp)} />
-          <span className="field-hint">Approximate time is okay.</span>
+          <span className="field-hint">Approximate time is okay. Time is shown in India Standard Time (IST).</span>
           {errors.timestamp && <span className="field-error">{errors.timestamp}</span>}
         </div>
         <div className="form-field">
@@ -136,7 +145,7 @@ export default function ItemForm({ kind, onSubmit }) {
         </div>
         {formError && <div className="form-field full"><span className="field-error" role="alert">{formError}</span></div>}
       </div>
-      <div className="notice-card" style={{ marginTop: 16 }}><Info size={15} /><span>This prototype saves your photo, when provided, and report in this browser only. Don’t add student ID numbers or sensitive personal information.</span></div>
+      <div className="notice-card" style={{ marginTop: 16 }}><Info size={15} /><span>Your report is stored on the CampusFind backend. Photos are uploaded only when you choose one. Don’t add student ID numbers or sensitive personal information.</span></div>
       <div className="form-actions">
         <button className="button button-primary" type="submit" disabled={saving}>{saving ? 'Saving…' : <><Check size={15} /> Post {isFound ? 'found' : 'lost'} report</>}</button>
       </div>
