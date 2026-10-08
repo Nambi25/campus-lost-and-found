@@ -1,0 +1,7 @@
+# Install torch FIRST with the small CPU build (already done on your machine):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+google-genai
+open_clip_torch
+torch
+pillow
+numpy

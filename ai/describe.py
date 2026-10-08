@@ -1,0 +1,108 @@
+"""
+FoundIt AI pipeline - step 1: photo -> structured description (Gemma 4).
+
+Run standalone:   python -m ai.describe photo1.jpg photo2.jpg     (from repo root)
+Import from B:    from ai.describe import describe_item
+"""
+import json
+import re
+import sys
+
+from google import genai
+from google.genai import types
+
+MODEL = "gemma-4-26b-a4b-it"  # alternative: "gemma-4-31b-it" (bigger, slower)
+
+from ai.categories import CATEGORIES, normalize_category, prompt_block
+
+SYSTEM_PROMPT = f"""You help a campus lost-and-found system. You are given ONE photo of an item.
+Return ONLY a JSON object (no markdown, no extra text) with exactly these keys:
+
+- "category": pick the single closest of these:
+{prompt_block()}
+- "title": short label, max 6 words (e.g. "Black earbud case")
+- "color": main color(s)
+- "brand": brand name or logo text visible anywhere on the item (put it here, never in private_details), otherwise null
+- "public_description": 1-2 generic sentences safe to show everyone. Do NOT mention
+  stickers, names, numbers, scratches, keychains or contents. DO describe generic visible features that tell similar items of this category apart (colour of each part, shape, material, style).
+- "private_details": list of 2-5 distinguishing details only the true owner would know
+  (stickers, scratches, damage, keychains, text, what is attached or inside). Be specific.
+- "contains_personal_info": true if a name, ID number, face or phone number is visible
+
+Never copy names, ID numbers or phone numbers into any field. Say "name visible" instead.
+If you cannot tell something, use null or an empty list. Do not guess."""
+
+_client = None
+
+
+def _get_client():
+    """Created lazily so importing this module never crashes when the key is missing."""
+    global _client
+    if _client is None:
+        _client = genai.Client()  # reads GEMINI_API_KEY from the environment
+    return _client
+
+
+def _parse_json(text: str) -> dict:
+    """Models sometimes wrap JSON in ```json fences or add chatter. Be forgiving."""
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?|```$", "", text, flags=re.MULTILINE).strip()
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError(f"No JSON found in model output: {text[:200]}")
+    return json.loads(text[start : end + 1])
+
+
+def _normalize(data: dict) -> dict:
+    """Guarantee every key exists so B and A never crash on odd model output."""
+    data["category"] = normalize_category(data.get("category"))
+    data.setdefault("title", "Unknown item")
+    data.setdefault("color", None)
+    data.setdefault("brand", None)
+    data.setdefault("public_description", "")
+    if not isinstance(data.get("private_details"), list):
+        data["private_details"] = []
+    data.setdefault("contains_personal_info", False)
+    return data
+
+
+def describe_item(image_path: str, attempts: int = 2) -> dict:
+    """Photo path -> structured dict. B calls this inside POST /items."""
+    client = _get_client()
+    uploaded = client.files.upload(file=image_path)
+    last_error = None
+    for _ in range(attempts):
+        try:
+            response = client.models.generate_content(
+                model=MODEL,
+                contents=[uploaded, "Describe this item for the lost-and-found."],
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT,
+                    thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+                ),
+            )
+            return _normalize(_parse_json(response.text))
+        except Exception as e:  # bad JSON or transient API error: retry once
+            last_error = e
+    raise RuntimeError(f"describe_item failed after {attempts} attempts: {last_error}")
+
+
+if __name__ == "__main__":
+    for path in sys.argv[1:]:
+        print(f"\n=== {path} ===")
+        try:
+            print(json.dumps(describe_item(path), indent=2, ensure_ascii=False))
+        except Exception as e:
+            print("FAILED:", e)
+
+
+# --- local/offline switch: FOUNDIT_LOCAL=1 routes describe_item through Ollama ---
+_describe_item_cloud = describe_item
+
+
+def describe_item(image_path):
+    import os as _os
+    if _os.environ.get("FOUNDIT_LOCAL") == "1":
+        from ai.describe_local import describe_item_local
+        return describe_item_local(image_path)
+    return _describe_item_cloud(image_path)

@@ -1,0 +1,104 @@
+"""
+FoundIt AI pipeline - step 3b: search + auto-match. These are the two functions B calls.
+
+Item dict shape (the contract with B; B stores/loads these fields):
+    {
+      "id": 7,
+      "type": "lost" | "found",
+      "category": "earbuds",
+      "title": "...", "color": "...", "public_description": "...",
+      "text_vec": [...],            # from embeddings.embed_item
+      "image_vec": [...] or None    # None when a lost report has no photo
+    }
+Never put private_details in anything returned to the frontend.
+"""
+from __future__ import annotations
+
+from typing import Callable
+
+from .similarity import cosine, minmax, top_k
+
+# Weights for item-vs-item matching. Image similarity is the stronger signal.
+W_IMAGE = 0.65
+W_TEXT = 0.35
+
+# Tune this with ai/test_pipeline.py on your own demo photos.
+MATCH_THRESHOLD = 0.75
+
+
+def _opposite(item_type: str) -> str:
+    return "found" if item_type == "lost" else "lost"
+
+
+from ai.categories import categories_compatible
+
+
+def _same_kind(a: dict, b: dict) -> bool:
+    """Different known categories can never be the same object."""
+    ca, cb = a.get("category"), b.get("category")
+    if not ca or not cb or "other" in (ca, cb):
+        return True
+    return categories_compatible(ca, cb)
+
+
+def pair_score(a: dict, b: dict) -> float:
+    """Similarity of two items, 0..1-ish. Uses whichever vectors both items have."""
+    total, weight = 0.0, 0.0
+    if a.get("image_vec") and b.get("image_vec"):
+        total += W_IMAGE * cosine(a["image_vec"], b["image_vec"])
+        weight += W_IMAGE
+    if a.get("text_vec") and b.get("text_vec"):
+        total += W_TEXT * cosine(a["text_vec"], b["text_vec"])
+        weight += W_TEXT
+    return total / weight if weight else 0.0
+
+
+def match_item(new_item: dict, candidates: list[dict], k: int = 5,
+               threshold: float | None = MATCH_THRESHOLD) -> list[dict]:
+    """Auto-match: when a found item is posted, find open LOST reports (and vice versa).
+
+    Returns [{"id": ..., "score": 0.83}, ...] best first, only above `threshold`
+    (pass threshold=None to see everything, useful for tuning).
+    """
+    wanted = _opposite(new_item.get("type", "found"))
+    scored = []
+    for c in candidates:
+        if c.get("type") != wanted or c.get("id") == new_item.get("id"):
+            continue
+        if not _same_kind(new_item, c):
+            continue
+        s = pair_score(new_item, c)
+        if threshold is None or s >= threshold:
+            scored.append({"id": c.get("id"), "score": round(s, 4)})
+    return top_k(scored, k)
+
+
+def search(query: str, items: list[dict], k: int = 10,
+           embed_query: Callable[[str], list[float]] | None = None) -> list[dict]:
+    """Natural-language search, e.g. "something to charge my phone".
+
+    Compares the query with each item's text AND (if present) its photo, then averages the
+    two after rescaling to 0..1. Returns [{"id": ..., "score": ...}, ...] best first.
+    `embed_query` can be injected for tests; by default the real CLIP text encoder is used.
+    """
+    if not items:
+        return []
+    if embed_query is None:
+        from .embeddings import embed_text as embed_query
+    q = embed_query(query)
+
+    text_sims = [cosine(q, it.get("text_vec")) for it in items]
+    image_sims = [cosine(q, it.get("image_vec")) if it.get("image_vec") else None for it in items]
+
+    text_norm = minmax(text_sims)
+    have_img = [i for i, s in enumerate(image_sims) if s is not None]
+    img_norm_vals = minmax([image_sims[i] for i in have_img])
+    img_norm = dict(zip(have_img, img_norm_vals))
+
+    scored = []
+    for i, it in enumerate(items):
+        score = text_norm[i]
+        if i in img_norm:
+            score = 0.5 * text_norm[i] + 0.5 * img_norm[i]
+        scored.append({"id": it.get("id"), "score": round(score, 4)})
+    return top_k(scored, k)
