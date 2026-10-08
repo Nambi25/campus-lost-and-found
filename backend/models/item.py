@@ -36,6 +36,7 @@ class Item(Base):
     location: Mapped[str] = mapped_column(String(150), index=True)
     event_time: Mapped[datetime] = mapped_column(DateTime)          # when it was lost/found
     image_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     image_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)   # perceptual hash
     color_sig: Mapped[str | None] = mapped_column(String(255), nullable=True)   # colour histogram
     # Finder sets a private question only the real owner can answer (e.g. "What's the lock-screen wallpaper?")
