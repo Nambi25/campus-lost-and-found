@@ -21,7 +21,6 @@ export default function ItemDetails() {
   const [item, setItem] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [claimOpen, setClaimOpen] = useState(false);
-  const [claimantName, setClaimantName] = useState('');
   const [details, setDetails] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -37,17 +36,16 @@ export default function ItemDetails() {
 
   const submitClaim = async (event) => {
     event.preventDefault();
-    if (claimantName.trim().length < 2 || details.trim().length < 12) {
-      setError('Add your name and a specific identifying detail (at least 12 characters).');
+    if (details.trim().length < 12) {
+      setError('Add a specific identifying detail (at least 12 characters).');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      await createClaim(id, { claimantName, details });
+      await createClaim(id, { details });
       await refresh();
       setClaimOpen(false);
-      setClaimantName('');
       setDetails('');
     } catch (problem) {
       setError(problem.message);
@@ -76,8 +74,8 @@ export default function ItemDetails() {
             <div className="detail-photo-caption"><TypePill kind={item.kind} /><span className="tiny">{item.imageUrl ? `Photo shared by ${item.posterName}` : 'No item photo provided'}</span></div>
           </div>
           {suggestions.length > 0 && <section className="surface-card detail-card" style={{ marginTop: 13 }}>
-            <div className="match-note-top"><span className="match-mode">Suggested matches · local demo hints</span><Sparkles size={16} /></div>
-            <p className="field-hint">Suggestions compare category, nearby campus spot, and description words. Visual AI is not connected.</p>
+            <div className="match-note-top"><span className="match-mode">Suggested matches · backend matching</span><Sparkles size={16} /></div>
+            <p className="field-hint">Suggestions compare category, nearby campus spot, and description words. The backend uses image hashes, colour similarity, and text/category similarity.</p>
             <div className="match-list">{suggestions.map(({ item: match, score, reason }) => <Link className="match-item" to={`/items/${match.id}`} key={match.id}>
               {match.imageUrl ? <img src={match.imageUrl} alt="" /> : <div className="match-thumb-fallback" aria-hidden="true">{match.emoji || '◈'}</div>}<span className="match-item-copy"><strong>{match.title}</strong><span>{reason}</span></span><span className="match-score">{Math.round(score * 100)}%</span>
             </Link>)}</div>
@@ -99,7 +97,7 @@ export default function ItemDetails() {
             {claimOpen && !isOwner && <form className="claim-form" onSubmit={submitClaim}>
               <h3>Help the owner verify it</h3>
               <p className="field-hint">Share a detail that wasn’t included in the public description. Don’t enter student ID numbers or other sensitive information.</p>
-              <label className="form-field">Your name<input className="form-control" value={claimantName} onChange={(event) => setClaimantName(event.target.value)} placeholder="First name or initials" /></label>
+              <p className="field-hint">Your signed-in CampusFind account is attached to this claim.</p>
               <label className="form-field">What detail shows it’s yours?<textarea className="form-textarea" value={details} onChange={(event) => setDetails(event.target.value)} placeholder="A mark, contents, or detail only the owner would know…" /></label>
               {error && <span className="field-error" role="alert">{error}</span>}
               <button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Sending…' : 'Send claim for review'}</button>
@@ -115,7 +113,7 @@ export default function ItemDetails() {
             </article>)}</div>}
             <div className="notice-card" style={{ marginTop: 12 }}><ShieldCheck size={14} /><span>Review the private detail, then arrange a safe handoff. This demo is not official campus identity verification.</span></div>
           </section>}
-          {!isOwner && <div className="notice-card"><ShieldCheck size={14} /><span>Claim notes are stored in this browser demo for the reporting student to review.</span></div>}
+          {!isOwner && <div className="notice-card"><ShieldCheck size={14} /><span>Claim notes are stored by the backend for the reporting student to review.</span></div>}
         </div>
       </div>
     </div>
