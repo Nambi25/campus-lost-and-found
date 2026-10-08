@@ -62,7 +62,7 @@ export default function Home() {
             <section className="surface-card match-note">
               <div className="match-note-top"><span className="match-mode">Match hints</span><Sparkles size={16} /></div>
               <h3>Lookalikes, surfaced.</h3>
-              <p>CampusFind compares item details and nearby spots to suggest reports that might be connected. Photo matching is an integration point; this demo uses a local fallback.</p>
+              <p>CampusFind compares item details and images to suggest reports that might be connected. Matching runs in the backend.</p>
               <Link className="button button-small button-block" to="/report-lost">Add a lost-item report <ArrowUpRight size={13} /></Link>
             </section>
             <div className="stat-strip" aria-label="Campus board counts">
