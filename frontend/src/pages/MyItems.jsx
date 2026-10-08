@@ -32,7 +32,7 @@ export default function MyItems() {
   return (
     <div className="page-wrap">
       <header className="page-header">
-        <div className="page-header-copy"><p className="eyebrow">Your demo activity</p><h1>My items.</h1><p className="lead">Keep an eye on your reports and the students who’ve shared a clue. Changes stay in this browser.</p></div>
+        <div className="page-header-copy"><p className="eyebrow">Your demo activity</p><h1>My items.</h1><p className="lead">Keep an eye on your reports and the students who’ve shared a clue. Changes are stored by the backend.</p></div>
         <Link className="button button-primary" to="/report-found"><PackageCheck size={15} /> Add a found item</Link>
       </header>
       <section className="dashboard-stats" aria-label="Your report statistics">
@@ -71,7 +71,7 @@ export default function MyItems() {
           <div className="my-item-thumb">{claim.itemImageUrl ? <img src={claim.itemImageUrl} alt="" /> : <span aria-hidden="true">◈</span>}</div><div className="my-item-copy"><StatusPill status={claim.status} label={`Claim ${claim.status}`} /><h3>{claim.itemTitle}</h3><div className="my-item-meta"><span>Submitted {new Date(claim.submittedAt).toLocaleDateString()}</span></div></div><Link className="button button-small" to={`/items/${claim.itemId}`}>View <ArrowUpRight size={12} /></Link>
         </article>)}</div>
       </section>}
-      <div className="notice-card" style={{ marginTop: 24 }}><ShieldCheck size={14} /><span>Demo data is saved in this browser only. A real school-wide service needs a server, durable storage, and account-based access controls.</span></div>
+      <div className="notice-card" style={{ marginTop: 24 }}><ShieldCheck size={14} /><span>This frontend is connected to the FastAPI backend with account-based access and durable SQLite storage.</span></div>
     </div>
   );
 }
